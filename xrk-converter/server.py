@@ -7,7 +7,6 @@ import copy
 import sys
 import traceback
 import time
-import datetime
 
 app = Flask(__name__)
 
@@ -21,7 +20,6 @@ MATLAB_SUBDIRS = [
 ]
 COMPILED_DIR = os.path.abspath('compiled')
 TMP_ROOT = os.path.abspath('tmp')
-OUTPUT_DIR = os.path.abspath('output')
 MAX_UPLOAD_SIZE_MB = 100
 
 app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -32,6 +30,14 @@ def copy_compiled_files(compiled_dir, base_dir):
     
     # Track what files were copied for debugging
     copied_files = []
+    
+    # Copy our fixed MATLAB file if it exists
+    fixed_matlab_file = os.path.join(os.path.dirname(compiled_dir), 'AutoExportXrkData.m')
+    if os.path.exists(fixed_matlab_file):
+        dst_file = os.path.join(base_dir, 'AutoExportXrkData.m')
+        shutil.copy2(fixed_matlab_file, dst_file)
+        print(f"✅ Using fixed MATLAB file: {os.path.basename(fixed_matlab_file)}")
+        copied_files.append(os.path.basename(dst_file))
     
     for root, _, files in os.walk(compiled_dir):
         rel_path = os.path.relpath(root, compiled_dir)
@@ -82,6 +88,10 @@ def convert_xrk():
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(TMP_ROOT, session_id)
     os.makedirs(session_dir, exist_ok=True)
+    
+    # Create data directory for output
+    data_dir = os.path.join(session_dir, 'data')
+    os.makedirs(data_dir, exist_ok=True)
 
     # Save uploaded XRK file
     file = request.files['file']
@@ -99,6 +109,10 @@ def convert_xrk():
     print(f"Working directory: {session_dir}")
     print(f"EXE path: {exe_path}")
     print(f"Exists: {os.path.exists(exe_path)}")
+    
+    # Check if our fixed MATLAB file was copied
+    fixed_matlab_path = os.path.join(session_dir, 'AutoExportXrkData.m')
+    print(f"Fixed MATLAB file exists: {os.path.exists(fixed_matlab_path)}")
     
     # Start timer for conversion
     start_time = time.time()
@@ -167,60 +181,27 @@ def convert_xrk():
     
     # If there's only one file, return it directly
     if len(output_files) == 1:
-        # Create timestamp and filename
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-        original_filename = os.path.splitext(file.filename)[0]
-        output_ext = os.path.splitext(output_files[0])[1]
-        
-        # Create unique filename with timestamp
-        output_filename = f"{original_filename}_{timestamp}{output_ext}"
-        
-        # Create output directory if it doesn't exist
-        os.makedirs(OUTPUT_DIR, exist_ok=True)
-        
-        # Copy file to output directory
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-        shutil.copy2(output_files[0], output_path)
-        print(f"✅ Saved output to {output_path}")
-        
-        # Send the file
         response = send_file(output_files[0], as_attachment=True)
         response.headers['X-Conversion-Time'] = f"{conversion_time:.2f} seconds"
-        response.headers['X-Output-Path'] = output_path
         return response
 
     # Else, zip and send all
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    original_filename = os.path.splitext(file.filename)[0]
-    
-    # Create unique filename with timestamp
-    output_filename = f"{original_filename}_{timestamp}.zip"
-    
-    # Create output directory if it doesn't exist
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Path for temporary zip and final output zip
-    temp_zip_path = session_dir + '.zip'
-    final_zip_path = os.path.join(OUTPUT_DIR, output_filename)
-    
-    # Create the zip file
+    zip_path = session_dir + '.zip'
     shutil.make_archive(session_dir, 'zip', output_dir)
     
-    # Copy the zip to output directory with timestamp filename
-    shutil.copy2(temp_zip_path, final_zip_path)
-    print(f"✅ Saved output to {final_zip_path}")
-    
     # Add conversion time to response headers
-    response = send_file(temp_zip_path, as_attachment=True)
+    response = send_file(zip_path, as_attachment=True)
     response.headers['X-Conversion-Time'] = f"{conversion_time:.2f} seconds"
-    response.headers['X-Output-Path'] = final_zip_path
     return response
 
 if __name__ == '__main__':
-    # Ensure temporary and output directories exist
+    # Ensure temporary directory exists
     os.makedirs(TMP_ROOT, exist_ok=True)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    print(f"✅ Output directory setup at: {OUTPUT_DIR}")
+    
+    # Create an output directory for easy access to results
+    output_dir = os.path.abspath('output')
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"✅ Output directory setup at: {output_dir}")
     
     # Check MATLAB Runtime configuration
     print("Checking MATLAB Runtime configuration...")

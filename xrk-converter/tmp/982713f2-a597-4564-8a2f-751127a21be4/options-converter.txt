@@ -1,0 +1,6 @@
+stat-misure=0
+stat-lap=0
+stat-gps=0
+gps-samples=0
+gps-samples-full=0
+stats-when-samples=0
